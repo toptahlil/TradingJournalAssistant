@@ -9,6 +9,7 @@ from pathlib import Path
 import time
 import queue
 import threading
+import re # Added for regular expressions to extract timestamp
 
 import mss
 import mss.tools
@@ -108,8 +109,7 @@ def get_week_of_month(d: datetime.date) -> int:
     first = d.replace(day=1)
     return d.isocalendar()[1] 
 
-#
-# def get_save_directory(event: str, inst: str, now: datetime.datetime) -> Path:
+def get_save_directory(event: str, inst: str, now: datetime.datetime) -> Path:
     base = get_base_path()
     y = str(now.year)
     mname = now.strftime("%B")
@@ -117,33 +117,6 @@ def get_week_of_month(d: datetime.date) -> int:
     week = f"Week_{now.isocalendar()[1]}" 
     day = now.strftime("%Y-%m-%d")
     path = base / y / f"{season}({mname})" / week / inst / day / event
-    path.mkdir(parents=True, exist_ok=True)
-    logging.info(f"Save directory: {path}")
-    return path
-def get_week_of_month(date: datetime.date) -> int:
-    first_day = date.replace(day=1)
-    first_day_weekday = first_day.weekday()  # Monday=0 ... Sunday=6
-    # محاسبه شروع اولین هفته کامل (از دوشنبه)
-    offset = (7 - first_day_weekday) % 7
-    first_full_week_start = first_day + datetime.timedelta(days=offset)
-    if date < first_full_week_start:
-        return 0
-    delta_days = (date - first_full_week_start).days
-    return 1 + delta_days // 7
-
-def get_save_directory(event: str, inst: str, now: datetime.datetime) -> Path:
-    base = get_base_path()
-    y = str(now.year)
-    mname = now.strftime("%B")      # اسم ماه انگلیسی
-    season = get_season(now.month)  # فصل (مثلاً Summer)
-    week_month = get_week_of_month(now.date())
-    week_year = now.isocalendar()[1]
-    week_folder = f"Week_{week_month}({week_year})"
-    day = now.strftime("%Y-%m-%d")
-    day_name = now.strftime("%A")  # نام روز هفته انگلیسی
-    day_folder = f"{day}({day_name})"
-
-    path = base / y / f"{season}({mname})" / week_folder / inst / day_folder / event
     path.mkdir(parents=True, exist_ok=True)
     logging.info(f"Save directory: {path}")
     return path
@@ -284,7 +257,7 @@ def take_screenshot_task(event: str, inst: str, mon_names_str: str,
     try:
         now = datetime.datetime.now()
         save_dir = get_save_directory(event, inst, now)
-        ts = now.strftime("%H-%M-%S")
+        ts = now.strftime("%H-%M-%S") # This is the unique timestamp for the set of screenshots
         doc = Document() if event == "Entry" else None
         names = [n.strip() for n in mon_names_str.split(",")]
 
@@ -325,8 +298,12 @@ def take_screenshot_task(event: str, inst: str, mon_names_str: str,
             logging.info(f"Capturing region for {name}: {monitor_region}")
             shot = sct.grab(monitor_region)
             
+            # ── IMPORTANT CHANGE: Ensure consistent filename format for timestamp matching ──
+            # Filenames will now be like "Monitor 1_18-49-32.png" (if name is "Monitor 1")
+            # or "Chart_18-49-32.png" (if name is "Chart")
             img_filename = f"{name}_{ts}.png"
             img_path = save_dir / img_filename
+            # ────────────────────────────────────────────────────────────────────────────────
             
             mss.tools.to_png(shot.rgb, shot.size, output=str(img_path))
             logging.info(f"Screenshot saved to {img_path}")
@@ -456,9 +433,7 @@ def display_image_fullscreen_on_monitor(image_path: Path, monitor_info, window_n
         background[max(0, y_offset):min(mon_height, y_offset+new_height), 
                    max(0, x_offset):min(mon_width, x_offset+new_width)] = resized_img
 
-        # ── MODIFIED: Set the window name (title) for OpenCV windows ──────────
         cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-        # ──────────────────────────────────────────────────────────────────────
         cv2.resizeWindow(window_name, mon_width, mon_height)
         cv2.moveWindow(window_name, monitor_info.x, monitor_info.y)
         
@@ -512,10 +487,29 @@ def view_screenshots_gui_task(monitor_names_str: tk.StringVar, view_button_ref: 
             logging.warning(f"Attempted to view screenshots from non-existent directory based on selected file: {view_dir}")
             return
 
-        image_files = sorted(list(view_dir.glob("*.png")))
+        # ── MODIFIED: Extract timestamp from the selected file name ──────────
+        # Example filename: "Monitor 1_18-49-32.png" or "Chart_18-49-32.png"
+        # We need to extract "18-49-32"
+        match = re.search(r'(\d{2}-\d{2}-\d{2})\.png$', selected_file_path.name)
+        if not match:
+            messagebox.showerror("Error", "Could not extract timestamp from the selected file name. Please select a valid screenshot.")
+            logging.error(f"Failed to extract timestamp from selected file: {selected_file_path.name}")
+            return
+        
+        target_timestamp = match.group(1)
+        logging.info(f"Target timestamp extracted from selected file: {target_timestamp}")
+
+        # Now, filter files in the directory to only include those with this timestamp
+        all_png_files_in_dir = sorted(list(view_dir.glob("*.png")))
+        image_files = []
+        for f in all_png_files_in_dir:
+            if target_timestamp in f.name:
+                image_files.append(f)
+        # ──────────────────────────────────────────────────────────────────────
+
         if not image_files:
-            messagebox.showinfo("No Images", f"No screenshots found in:\n{view_dir}")
-            logging.info(f"No screenshots found in {view_dir}.")
+            messagebox.showinfo("No Images Found", f"No screenshots matching the timestamp '{target_timestamp}' found in:\n{view_dir}")
+            logging.info(f"No screenshots matching timestamp {target_timestamp} found in {view_dir}.")
             return
 
         # Update last_view_path_var with the directory of the selected file
