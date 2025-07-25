@@ -1,0 +1,8 @@
+{
+    "telegram_chat_id": "-1002080499408",
+    "instrument": "6B",
+    "enable_telegram_send": true,
+    "monitor_names": "Monitor 1,Monitor 2,Monitor 3,Monitor 4,Monitor 5",
+    "default_description": "Reviewing trade setup.",
+    "last_view_path": "C:\\Users\\HP\\Documents\\Trading Journal\\2025\\Summer(July)\\Week_3(30)\\6B\\2025-07-21(Monday)\\Entry"
+}
